@@ -28,8 +28,24 @@
     flex-direction:column;
     align-items:center;
     min-height:100%;
-    padding:28px 16px 40px;
+    padding:24px 16px 40px;
     overflow-x:hidden;
+  }
+  .topbar{
+    width:100%;
+    max-width:360px;
+    display:flex;
+    justify-content:flex-end;
+  }
+  .icon-btn{
+    background:var(--panel);
+    border:1px solid var(--cell-border);
+    color:var(--text);
+    width:36px;height:36px;
+    border-radius:10px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+    font-size:16px;
   }
   .eyebrow{
     letter-spacing:.14em;
@@ -37,6 +53,7 @@
     color:var(--thread-a);
     font-weight:700;
     text-transform:uppercase;
+    margin-top:6px;
   }
   h1{
     margin:4px 0 2px;
@@ -47,14 +64,14 @@
   .sub{
     color:var(--sub);
     font-size:13px;
-    margin-bottom:20px;
+    margin-bottom:16px;
     text-align:center;
     max-width:320px;
   }
   .diffs{
     display:flex;
     gap:8px;
-    margin-bottom:18px;
+    margin-bottom:14px;
   }
   .diff-btn{
     background:var(--panel);
@@ -70,6 +87,32 @@
     color:var(--ink);
     background:linear-gradient(135deg,var(--thread-a),var(--thread-b));
     border-color:transparent;
+  }
+  .hud{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    margin-bottom:14px;
+  }
+  .hud-chip{
+    background:var(--panel);
+    border:1px solid var(--cell-border);
+    border-radius:12px;
+    padding:8px 14px;
+    font-size:13px;
+    font-weight:700;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    min-width:78px;
+    justify-content:center;
+  }
+  .hud-chip .lab{
+    font-size:9px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--sub);
+    font-weight:700;
   }
   .stage{
     position:relative;
@@ -93,12 +136,15 @@
     display:flex;
     align-items:center;
     justify-content:center;
+    transition:box-shadow .2s ease;
   }
   .cell.visited{
     background:#2b2440;
     border-color:var(--thread-a);
   }
-  .cell.start{ }
+  .cell.hint-glow{
+    box-shadow:0 0 0 3px var(--thread-a), 0 0 16px var(--thread-a);
+  }
   .arrow{
     width:38%;
     height:38%;
@@ -128,6 +174,8 @@
     display:flex;
     gap:10px;
     margin-top:20px;
+    flex-wrap:wrap;
+    justify-content:center;
   }
   .btn{
     background:var(--panel);
@@ -144,11 +192,20 @@
     color:var(--ink);
     border-color:transparent;
   }
+  .btn:disabled{
+    opacity:.4;
+    cursor:not-allowed;
+  }
   .progress{
     margin-top:14px;
     font-size:12px;
     color:var(--sub);
     letter-spacing:.04em;
+  }
+  .best{
+    margin-top:4px;
+    font-size:11px;
+    color:var(--thread-a);
   }
   .overlay{
     position:fixed;inset:0;
@@ -170,10 +227,15 @@
   }
   .overlay.show .win-card{ transform:translateY(0); }
   .win-card h2{ margin:0 0 6px; font-size:22px; }
-  .win-card p{ margin:0 0 16px; color:var(--sub); font-size:13px; }
+  .win-card p{ margin:0 0 4px; color:var(--sub); font-size:13px; }
+  .win-card .win-time{ color:var(--thread-a); font-weight:800; font-size:15px; margin-bottom:16px; }
 </style>
 </head>
 <body>
+
+  <div class="topbar">
+    <button class="icon-btn" id="soundBtn" title="Toggle sound">🔊</button>
+  </div>
 
   <div class="eyebrow">Prototype · Web</div>
   <h1>Threadwalk</h1>
@@ -185,14 +247,21 @@
     <button class="diff-btn" data-cols="7" data-rows="9">Hard</button>
   </div>
 
+  <div class="hud">
+    <div class="hud-chip"><span id="timerVal">00:00</span><span class="lab">Time</span></div>
+    <div class="hud-chip"><span id="hintVal">3</span><span class="lab">Hints</span></div>
+  </div>
+
   <div class="stage">
     <div class="grid" id="grid"></div>
   </div>
 
   <div class="progress" id="progress">0 / 0 cells</div>
+  <div class="best" id="bestVal"></div>
 
   <div class="controls">
     <button class="btn" id="resetBtn">Reset</button>
+    <button class="btn" id="hintBtn">💡 Hint</button>
     <button class="btn primary" id="newBtn">New Puzzle</button>
   </div>
 
@@ -200,6 +269,7 @@
     <div class="win-card">
       <h2>Thread complete ✨</h2>
       <p>Poora path sahi trace hua.</p>
+      <div class="win-time" id="winTime"></div>
       <button class="btn primary" id="winNewBtn">Play Again</button>
     </div>
   </div>
@@ -208,16 +278,112 @@
 (function(){
   const gridEl = document.getElementById('grid');
   const progressEl = document.getElementById('progress');
+  const bestEl = document.getElementById('bestVal');
   const overlay = document.getElementById('overlay');
+  const timerValEl = document.getElementById('timerVal');
+  const hintValEl = document.getElementById('hintVal');
+  const hintBtn = document.getElementById('hintBtn');
+  const soundBtn = document.getElementById('soundBtn');
+  const winTimeEl = document.getElementById('winTime');
   const CELL = 44, GAP = 4;
 
-  let rows = 8, cols = 6;
+  let rows = 8, cols = 6, diffKey = 'medium';
   let path = [];
   let cellEls = [];
   let currentIndex = 0;
   let dragging = false;
   let svg, polyline;
 
+  let timerInterval = null;
+  let startTime = null;
+  let elapsedMs = 0;
+  let finished = false;
+
+  let hintsLeft = 3;
+  const HINTS_PER_PUZZLE = 3;
+
+  let muted = false;
+  let audioCtx = null;
+
+  // ---------- audio ----------
+  function getCtx(){
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function playTone(freq, duration, type, vol){
+    if(muted) return;
+    try{
+      const ctx = getCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      gain.gain.value = vol || 0.14;
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      osc.stop(ctx.currentTime + duration);
+    }catch(e){}
+  }
+  function soundStep(idx){ playTone(420 + idx*6, 0.07, 'sine', 0.12); }
+  function soundBack(){ playTone(260, 0.08, 'sine', 0.1); }
+  function soundHint(){ playTone(660, 0.12, 'triangle', 0.12); }
+  function soundClick(){ playTone(340, 0.05, 'square', 0.06); }
+  function soundWin(){
+    [523,659,784,1046].forEach((f,i)=>{
+      setTimeout(()=>playTone(f, 0.18, 'sine', 0.14), i*110);
+    });
+  }
+
+  soundBtn.addEventListener('click', ()=>{
+    muted = !muted;
+    soundBtn.textContent = muted ? '🔇' : '🔊';
+    localStorage.setItem('threadwalk_muted', muted ? '1' : '0');
+  });
+  if(localStorage.getItem('threadwalk_muted') === '1'){
+    muted = true; soundBtn.textContent = '🔇';
+  }
+
+  // ---------- timer ----------
+  function formatTime(ms){
+    const total = Math.floor(ms/1000);
+    const m = String(Math.floor(total/60)).padStart(2,'0');
+    const s = String(total%60).padStart(2,'0');
+    return `${m}:${s}`;
+  }
+  function startTimer(){
+    if(timerInterval) return;
+    startTime = Date.now() - elapsedMs;
+    timerInterval = setInterval(()=>{
+      elapsedMs = Date.now() - startTime;
+      timerValEl.textContent = formatTime(elapsedMs);
+    }, 250);
+  }
+  function stopTimer(){
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  function resetTimer(){
+    stopTimer();
+    elapsedMs = 0;
+    timerValEl.textContent = '00:00';
+  }
+
+  function bestKey(){ return `threadwalk_best_${diffKey}`; }
+  function showBest(){
+    const v = localStorage.getItem(bestKey());
+    bestEl.textContent = v ? `Best: ${formatTime(+v)}` : '';
+  }
+  function maybeSaveBest(ms){
+    const cur = localStorage.getItem(bestKey());
+    if(!cur || ms < +cur){
+      localStorage.setItem(bestKey(), String(ms));
+    }
+    showBest();
+  }
+
+  // ---------- puzzle generation ----------
   function shuffle(arr){
     for(let i=arr.length-1;i>0;i--){
       const j = Math.floor(Math.random()*(i+1));
@@ -238,21 +404,18 @@
         return shuffle([[r-1,c],[r+1,c],[r,c-1],[r,c+1]])
           .filter(([nr,nc])=>nr>=0&&nr<rows&&nc>=0&&nc<cols&&!visited[nr][nc]);
       }
-
-      function dfs(r,c,depth){
+      function dfs(r,c){
         visited[r][c]=true; p.push([r,c]);
         if(p.length===total) return true;
         const ns = neighborsOf(r,c);
         for(const [nr,nc] of ns){
-          if(dfs(nr,nc,depth+1)) return true;
+          if(dfs(nr,nc)) return true;
         }
         visited[r][c]=false; p.pop();
         return false;
       }
-
-      if(dfs(sr,sc,0)) return p;
+      if(dfs(sr,sc)) return p;
     }
-    // fallback: boustrophedon snake, always valid
     const p=[];
     for(let r=0;r<rows;r++){
       if(r%2===0) for(let c=0;c<cols;c++) p.push([r,c]);
@@ -331,6 +494,12 @@
     gridEl.appendChild(svg);
 
     currentIndex = 0;
+    finished = false;
+    hintsLeft = HINTS_PER_PUZZLE;
+    hintValEl.textContent = hintsLeft;
+    hintBtn.disabled = false;
+    resetTimer();
+    showBest();
     updateVisited();
     updateProgress();
   }
@@ -362,13 +531,13 @@
     if(!cellDiv || !gridEl.contains(cellDiv)) return null;
     return cellDiv;
   }
-
   function idxOfCellDiv(div){
     const r = +div.dataset.r, c = +div.dataset.c;
     return path.findIndex(([pr,pc]) => pr===r && pc===c);
   }
 
   gridEl.addEventListener('pointerdown', (e)=>{
+    if(finished) return;
     const div = cellFromPoint(e.clientX, e.clientY);
     if(!div) return;
     const idx = idxOfCellDiv(div);
@@ -376,11 +545,12 @@
     dragging = true;
     currentIndex = 0;
     updateVisited(); updateProgress();
+    startTimer();
     gridEl.setPointerCapture(e.pointerId);
   });
 
   gridEl.addEventListener('pointermove', (e)=>{
-    if(!dragging) return;
+    if(!dragging || finished) return;
     const div = cellFromPoint(e.clientX, e.clientY);
     if(!div) return;
     const idx = idxOfCellDiv(div);
@@ -388,28 +558,50 @@
     if(idx === currentIndex+1){
       currentIndex = idx;
       updateVisited(); updateProgress();
+      soundStep(currentIndex);
       if(currentIndex === path.length-1){
         dragging = false;
+        finished = true;
+        stopTimer();
+        soundWin();
+        winTimeEl.textContent = `Time: ${formatTime(elapsedMs)}`;
+        maybeSaveBest(elapsedMs);
         setTimeout(()=> overlay.classList.add('show'), 200);
       }
     } else if(idx === currentIndex-1){
       currentIndex = idx;
       updateVisited(); updateProgress();
+      soundBack();
     }
   });
 
-  function endDrag(e){
-    dragging = false;
-  }
+  function endDrag(){ dragging = false; }
   gridEl.addEventListener('pointerup', endDrag);
   gridEl.addEventListener('pointercancel', endDrag);
 
   document.getElementById('resetBtn').addEventListener('click', ()=>{
+    soundClick();
     currentIndex = 0;
+    finished = false;
     updateVisited(); updateProgress();
     overlay.classList.remove('show');
+    resetTimer();
   });
+
+  hintBtn.addEventListener('click', ()=>{
+    if(finished || hintsLeft <= 0 || currentIndex >= path.length-1) return;
+    const [nr,nc] = path[currentIndex+1];
+    const el = cellEls[nr*cols+nc];
+    el.classList.add('hint-glow');
+    soundHint();
+    setTimeout(()=> el.classList.remove('hint-glow'), 800);
+    hintsLeft--;
+    hintValEl.textContent = hintsLeft;
+    if(hintsLeft<=0) hintBtn.disabled = true;
+  });
+
   document.getElementById('newBtn').addEventListener('click', ()=>{
+    soundClick();
     overlay.classList.remove('show');
     buildGrid();
   });
@@ -420,10 +612,12 @@
 
   document.querySelectorAll('.diff-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      soundClick();
       document.querySelectorAll('.diff-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
       cols = +btn.dataset.cols;
       rows = +btn.dataset.rows;
+      diffKey = btn.textContent.trim().toLowerCase();
       overlay.classList.remove('show');
       buildGrid();
     });
